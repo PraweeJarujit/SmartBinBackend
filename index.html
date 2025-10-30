@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Bin Sensor - Data Monitor</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@404;700&display=swap" rel="stylesheet">
+    <style>
+        /* (CSS เดิมทั้งหมด - ไม่เปลี่ยนแปลง) */
+        :root {
+            --color-bg: #1e1e1e; --color-main-text: #ffffff; --color-light-text: #cccccc; 
+            --color-success: #28a745; --color-warning: #ffc107; --color-critical: #dc3545; 
+            --color-border: #444444; --font-primary: 'Roboto', sans-serif;
+        }
+        body { background-color: var(--color-bg); color: var(--color-main-text); font-family: var(--font-primary); padding: 30px; text-align: center; }
+        h1 { color: var(--color-main-text); font-size: 2.5em; font-weight: 700; margin-bottom: 40px; border-bottom: 1px solid var(--color-border); padding-bottom: 10px; }
+        .data-console { max-width: 1100px; margin: 0 auto; border: 1px solid var(--color-border); padding: 25px; background-color: #252526; border-radius: 4px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); }
+        .sensor-data { display: flex; justify-content: space-around; margin: 30px 0; flex-wrap: wrap; }
+        .data-card { border: 1px solid var(--color-border); padding: 20px 15px; margin: 10px; width: 280px; background-color: #2c2c2c; border-radius: 4px; text-align: left; }
+        .data-label { color: var(--color-light-text); font-size: 0.9em; margin-bottom: 5px; text-transform: uppercase; }
+        .data-value { font-size: 2.5em; font-weight: 700; }
+        .level-bar-outer { height: 25px; width: 100%; background-color: #444444; border-radius: 3px; overflow: hidden; margin-top: 5px; }
+        .level-bar-inner { height: 100%; background-color: var(--color-success); width: 0%; transition: width 0.5s ease-in-out, background-color 0.5s; }
+        .level-bar-inner.warning { background-color: var(--color-warning); } 
+        .level-bar-inner.critical { background-color: var(--color-critical); }
+        .status-text { color: var(--color-main-text); font-size: 1.1em; margin-bottom: 5px; }
+        .alert-box { margin-top: 40px; padding: 15px; border: 2px solid var(--color-critical); background-color: rgba(220, 53, 69, 0.2); color: var(--color-critical); font-weight: 700; display: none; animation: pulse 1.5s infinite alternate; }
+        .alert-box.active { display: block; }
+        @keyframes pulse { from { opacity: 1; } to { opacity: 0.8; } }
+        
+        /* (CSS สำหรับตาราง) */
+        .data-log h2 { color: var(--color-main-text); font-size: 1.5em; margin-bottom: 15px; border-bottom: 1px solid var(--color-border); padding-bottom: 5px; }
+        .data-log table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
+        .data-log th, .data-log td { border-bottom: 1px solid var(--color-border); padding: 10px 15px; text-align: left; }
+        .data-log th { color: var(--color-light-text); background-color: #333333; }
+        .status-CRITICAL { color: var(--color-critical); font-weight: 700; }
+        .status-WARNING { color: var(--color-warning); font-weight: 700; }
+        
+        /* (CSS ใหม่) สำหรับ Alert Feed */
+        .type-SYSTEM { color: #888; }
+        .type-CAPACITY { color: var(--color-main-text); }
+        .type-DANGER { color: var(--color-critical); font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="data-console">
+        <h1>ระบบตรวจจับขยะอัจฉริยะ</h1>
+
+        <div class="level-container">
+            <div class="status-text">🗑️ **ระดับถังขยะ: <span id="capacity-percent">--</span>%** [STATUS: <span id="capacity-status">CONNECTING...</span>]</div>
+            <div class="level-bar-outer">
+                <div class="level-bar-inner" id="level-bar"></div>
+            </div>
+        </div>
+        <div class="sensor-data">
+            <div class="data-card">
+                <div class="data-label">🗑️ ความจุขยะ (V1)</div>
+                <div class="data-value" id="capacity-card-value">-- %</div>
+            </div>
+            <div class="data-card">
+                <div class="data-label">🌡️ อุณหภูมิ (V2)</div>
+                <div class="data-value" id="temp-value">-- °C</div>
+            </div>
+            <div class="data-card">
+                <div class="data-label">💨 ระดับความเป็นพิษ (V3)</div>
+                <div class="data-value" id="gas-value">-- RAW</div>
+            </div>
+        </div>
+        <div class="alert-box" id="alert-box">
+            🚨 **CRITICAL ALERT: BIN IS NEAR FULL. COLLECTION REQUIRED.**
+        </div>
+
+        <div class="data-log">
+            <h2>ALERT FEED (การแจ้งเตือนล่าสุด)</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>TIME</th>
+                        <th>TYPE</th>
+                        <th>MESSAGE</th>
+                    </tr>
+                </thead>
+                <tbody id="alert-feed-body">
+                    </tbody>
+            </table>
+        </div>
+
+        <div class="data-log">
+            <h2>HOURLY STATISTICS (สถิติรายชั่วโมง)</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>HOUR</th>
+                        <th>AVG. CAPACITY</th>
+                        <th>MAX. TEMP</th>
+                        <th>MAX. GAS</th>
+                    </tr>
+                </thead>
+                <tbody id="hourly-stats-body">
+                    </tbody>
+            </table>
+        </div>
+
+        <div class="data-log">
+            <h2>DATA LOG HISTORY (ข้อมูลดิบ 10 รายการล่าสุด)</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>TIME</th>
+                        <th>CAPACITY (V1)</th>
+                        <th>TEMP (V2)</th>
+                        <th>GAS RAW (V3)</th>
+                        <th>STATUS</th>
+                    </tr>
+                </thead>
+                <tbody id="log-body">
+                    </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // *******************************************************************
+        // เปลี่ยน URL นี้ให้ตรงกับที่อยู่จริงของ dbread.php บนเซิร์ฟเวอร์
+        const DATA_API_URL = "https://angsila.cs.buu.ac.th/~67160349/SmartBin/dbread.php"; 
+        // *******************************************************************
+
+        // ฟังก์ชันอัปเดต Dashboard หลัก
+        function updateDashboard(latest, status) {
+            const bar = document.getElementById('level-bar');
+            const alertBox = document.getElementById('alert-box');
+            
+            const capacity = parseInt(latest.value1);
+            const temp = parseFloat(latest.value2);
+            const gasRaw = parseFloat(latest.value3);
+
+            bar.style.width = capacity + '%';
+            document.getElementById('capacity-percent').textContent = capacity;
+            document.getElementById('capacity-status').textContent = status.toUpperCase();
+            document.getElementById('capacity-card-value').textContent = capacity + ' %';
+
+            bar.classList.remove('warning', 'critical');
+            alertBox.classList.remove('active');
+            
+            if (status === 'CRITICAL') {
+                bar.classList.add('critical');
+                alertBox.classList.add('active');
+            } else if (status === 'WARNING') {
+                bar.classList.add('warning');
+            } 
+            
+            document.getElementById('temp-value').textContent = temp.toFixed(1) + ' °C';
+            document.getElementById('gas-value').textContent = gasRaw.toFixed(0) + ' RAW'; 
+            // ลบโค้ด humidity-value ออกแล้ว
+        }
+
+        // ฟังก์ชันอัปเดตตาราง Data Log (ข้อมูลดิบ)
+        function updateLogTable(history) {
+            const logBody = document.getElementById('log-body');
+            logBody.innerHTML = ''; 
+
+            if (history && history.length > 0) {
+                history.forEach(record => {
+                    const newRow = logBody.insertRow();
+                    // ใช้ record.timestamp ซึ่งถูกตั้งค่าใน dbread.php แล้ว
+                    const timeStr = new Date(record.timestamp).toLocaleTimeString('th-TH', { hour12: false }); 
+                    
+                    newRow.insertCell(0).textContent = timeStr;
+                    newRow.insertCell(1).textContent = record.value1 + '%';
+                    newRow.insertCell(2).textContent = parseFloat(record.value2).toFixed(1);
+                    newRow.insertCell(3).textContent = record.value3;
+                    
+                    const statusCell = newRow.insertCell(4);
+                    statusCell.textContent = record.alert_status.toUpperCase();
+                    statusCell.className = 'status-' + record.alert_status.toUpperCase();
+                });
+            } else {
+                logBody.innerHTML = '<tr><td colspan="5" style="text-align:center;">No data records found.</td></tr>';
+            }
+        }
+
+        // (ใหม่) ฟังก์ชันอัปเดตตาราง Alert Feed
+        function updateAlertFeed(alerts) {
+            const alertBody = document.getElementById('alert-feed-body');
+            alertBody.innerHTML = ''; 
+
+            if (alerts && alerts.length > 0) {
+                alerts.forEach(record => {
+                    const newRow = alertBody.insertRow();
+                    const timeStr = new Date(record.timestamp).toLocaleString('th-TH', { hour12: false });
+                    
+                    newRow.insertCell(0).textContent = timeStr;
+                    
+                    const typeCell = newRow.insertCell(1);
+                    typeCell.textContent = record.alert_type;
+                    typeCell.className = 'type-' + record.alert_type.toUpperCase();
+
+                    newRow.insertCell(2).textContent = record.message;
+                });
+            } else {
+                alertBody.innerHTML = '<tr><td colspan="3" style="text-align:center;">No alerts found.</td></tr>';
+            }
+        }
+
+        // (ใหม่) ฟังก์ชันอัปเดตตาราง Hourly Stats
+        function updateHourlyStats(stats) {
+            const statsBody = document.getElementById('hourly-stats-body');
+            statsBody.innerHTML = ''; 
+
+            if (stats && stats.length > 0) {
+                stats.forEach(record => {
+                    const newRow = statsBody.insertRow();
+                    // ใช้นาฬิกาของเบราว์เซอร์ในการแสดงผลชั่วโมง
+                    const timeStr = new Date(record.hour_timestamp).toLocaleString('th-TH', { hour12: false }); 
+                    
+                    newRow.insertCell(0).textContent = timeStr;
+                    newRow.insertCell(1).textContent = parseFloat(record.avg_capacity).toFixed(1) + ' %';
+                    newRow.insertCell(2).textContent = parseFloat(record.max_temp).toFixed(1) + ' °C';
+                    newRow.insertCell(3).textContent = parseFloat(record.max_gas).toFixed(0) + ' RAW';
+                });
+            } else {
+                statsBody.innerHTML = '<tr><td colspan="4" style="text-align:center;">No hourly statistics found.</td></tr>';
+            }
+        }
+
+
+        // (อัปเดต) ฟังก์ชันหลักในการดึงข้อมูล
+        function fetchDataAndUpdate() {
+            fetch(DATA_API_URL)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.status === 'success' && data.latest) {
+                        
+                        // ดึงสถานะปัจจุบันจาก Log History (ข้อมูลดิบ)
+                        const status = data.log_history[0] ? data.log_history[0].alert_status : 'OK'; 
+
+                        // 1. อัปเดต Dashboard หลัก
+                        updateDashboard(data.latest, status);
+                        
+                        // 2. อัปเดตตาราง Data Log (ข้อมูลดิบ)
+                        updateLogTable(data.log_history);
+
+                        // 3. (ใหม่) อัปเดตตาราง Alert Feed
+                        updateAlertFeed(data.alert_feed);
+
+                        // 4. (ใหม่) อัปเดตตาราง Hourly Stats
+                        updateHourlyStats(data.hourly_stats);
+
+                    } else {
+                        document.getElementById('capacity-status').textContent = 'API READ ERROR!';
+                        document.getElementById('alert-box').textContent = 'ERROR: API returned failure status or missing data.';
+                        document.getElementById('alert-box').classList.add('active');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching data:', error);
+                    document.getElementById('capacity-status').textContent = 'NETWORK/FETCH FAILED!';
+                    document.getElementById('alert-box').textContent = 'ERROR: Cannot connect to API server. Check API URL or CORS setting.';
+                    document.getElementById('alert-box').classList.add('active');
+                });
+        }
+
+        // เริ่มต้นดึงข้อมูลและตั้งเวลาอัปเดต
+        fetchDataAndUpdate();
+        setInterval(fetchDataAndUpdate, 5000); 
+        
+    </script>
+</body>
+</html>
